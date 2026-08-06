@@ -1,0 +1,374 @@
+{
+  "info": {
+    "name": "Sanbuk — Tracking API",
+    "description": "Everything an advertiser's developer calls, in the order they should call it.\n\n**Setup**: open the collection variables and fill `apiKey`, `pixelId` and `clickId` from the advertiser panel (conversion action wizard → the \"server\" tab). `clickId` is the `snbk_cid` value from any landing-page visit that came through a Sanbuk link.\n\n**Rules that matter**\n1. Only the postback is billable. The pixel verifies; it never pays.\n2. `event_id` must be identical on both, and must be something you never reuse.\n3. Keep `X-Sanbuk-Mode: test` until the panel shows the action as verified.\n4. All amounts are integers in **Rial**.\n\nRun the whole collection with the Postman runner: every request asserts its own outcome.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Sandbox postback (start here)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('accepted', () => pm.response.to.have.status(202));",
+              "pm.test('answered in test mode', () => pm.expect(pm.response.json().mode).to.eql('test'));",
+              "pm.collectionVariables.set('lastEventId', pm.response.json().event_id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{apiKey}}"
+          },
+          {
+            "key": "X-Sanbuk-Mode",
+            "value": "test"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"action\": \"{{action}}\",\n  \"event_id\": \"{{$guid}}\",\n  \"click_id\": \"{{clickId}}\",\n  \"value\": 25000000,\n  \"params\": {\n    \"order_id\": \"ORD-10293\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/postback",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "postback"
+          ]
+        },
+        "description": "Rehearse the integration. The event is stored and verifies the action, but never becomes a billable conversion. Run this until the action reads \"verified\" in the panel."
+      }
+    },
+    {
+      "name": "2. Live postback (billable)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('accepted', () => pm.response.to.have.status(202));",
+              "pm.test('answered live', () => pm.expect(pm.response.json().mode).to.eql('live'));",
+              "pm.collectionVariables.set('lastEventId', pm.response.json().event_id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{apiKey}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"action\": \"{{action}}\",\n  \"event_id\": \"{{$guid}}\",\n  \"click_id\": \"{{clickId}}\",\n  \"value\": 25000000,\n  \"params\": {\n    \"order_id\": \"ORD-10293\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/postback",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "postback"
+          ]
+        },
+        "description": "The same call without the mode header. With a valid click_id this creates a pending conversion and reserves the price against the advertiser wallet."
+      }
+    },
+    {
+      "name": "3. Duplicate postback (retry is safe)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('duplicate, not accepted', () => pm.response.to.have.status(200));",
+              "pm.test('status says duplicate', () => pm.expect(pm.response.json().status).to.eql('duplicate'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{apiKey}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"action\": \"{{action}}\",\n  \"event_id\": \"{{lastEventId}}\",\n  \"click_id\": \"{{clickId}}\",\n  \"value\": 25000000\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/postback",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "postback"
+          ]
+        },
+        "description": "Replays the event_id from the previous request. Idempotency is per (action, event_id): the answer is 200 and nothing is recorded twice — which is why an SDK may retry a timed-out postback without any bookkeeping."
+      }
+    },
+    {
+      "name": "4. Lead postback (no value)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('accepted', () => pm.response.to.have.status(202));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{apiKey}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"action\": \"lead\",\n  \"event_id\": \"{{$guid}}\",\n  \"click_id\": \"{{clickId}}\",\n  \"params\": {\n    \"phone\": \"09123334455\",\n    \"full_name\": \"سارا محمدی\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/postback",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "postback"
+          ]
+        },
+        "description": "An action whose value mode is fixed carries no `value`. Send `params` matching the campaign's lead form schema."
+      }
+    },
+    {
+      "name": "5. Pixel event (verification only)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('accepted or duplicate', () => pm.expect([200,202]).to.include(pm.response.code));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Sanbuk-Mode",
+            "value": "test"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"pixel_id\": \"{{pixelId}}\",\n  \"action\": \"{{action}}\",\n  \"event_id\": \"{{lastEventId}}\",\n  \"value\": 25000000\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/pixel",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "pixel"
+          ]
+        },
+        "description": "Normally fired by the snbk snippet, not by hand. Send the SAME event_id as the postback: pairing the two inside 48h is what promotes the action to \"verified\". A pixel event never bills on its own."
+      }
+    },
+    {
+      "name": "6. Error — unknown action",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('not found', () => pm.response.to.have.status(404));",
+              "pm.test('carries a stable code', () => pm.expect(pm.response.json().code).to.eql('unknown_action'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{apiKey}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"action\": \"no_such_action\",\n  \"event_id\": \"{{$guid}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/postback",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "postback"
+          ]
+        },
+        "description": "What a wrong action code looks like. Branch on `code`, never on `message`: the message is Persian and may change."
+      }
+    },
+    {
+      "name": "7. Error — bad API key",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('unauthorised', () => pm.response.to.have.status(401));",
+              "pm.test('carries a stable code', () => pm.expect(pm.response.json().code).to.eql('invalid_api_key'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer sk_live_snbk_wrong"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"action\": \"{{action}}\",\n  \"event_id\": \"{{$guid}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/postback",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "postback"
+          ]
+        },
+        "description": "Authentication failure. Sent with a deliberately wrong key."
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://t.sanbuk.com/v1",
+      "description": "Production edge. Local: http://localhost:8080"
+    },
+    {
+      "key": "apiKey",
+      "value": "",
+      "description": "Workspace API key — advertiser panel"
+    },
+    {
+      "key": "pixelId",
+      "value": "",
+      "description": "Public pixel id, e.g. SNBK-PX-XXXXX"
+    },
+    {
+      "key": "clickId",
+      "value": "",
+      "description": "An snbk_cid from a real click; without it nothing is attributable"
+    },
+    {
+      "key": "action",
+      "value": "purchase",
+      "description": "An action code defined in your workspace"
+    },
+    {
+      "key": "lastEventId",
+      "value": "",
+      "description": "Set by the requests above — used to prove idempotency and pairing"
+    }
+  ]
+}

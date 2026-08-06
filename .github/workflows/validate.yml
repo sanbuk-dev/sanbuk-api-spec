@@ -1,0 +1,33 @@
+name: validate
+
+# The spec here is generated, so this is a safety net rather than a gate: if a
+# sync ever lands something that does not parse, this is what says so.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Lint the OpenAPI document
+        run: npx --yes @redocly/cli@latest lint spec/openapi.yaml --extends minimal
+
+      - name: Check the Postman files are valid JSON
+        run: |
+          for f in postman/*.json; do
+            node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))" && echo "ok  $f"
+          done

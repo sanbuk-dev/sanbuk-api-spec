@@ -1,0 +1,234 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  GENERATED FILE — DO NOT EDIT
+#
+#  Authored in the Sanbuk backend and published here automatically whenever the
+#  contract changes. Edits made in this repository are overwritten by the next
+#  sync; open an issue instead.
+# ─────────────────────────────────────────────────────────────────────────────
+
+openapi: 3.1.0
+info:
+  title: Sanbuk Tracking API
+  version: 0.16.0
+  description: |
+    Two endpoints are all an advertiser ever calls.
+
+    **Postback (server to server)** is the financial source of truth: only a postback can
+    create a payable conversion. **Pixel (browser)** is verification and anti-fraud only and
+    is never billable on its own. Send the *same* `event_id` on both and Sanbuk pairs them
+    inside a 48-hour window — that pairing is the only thing we ask you to get right.
+
+    Integration checklist:
+
+    1. Keep the `snbk_cid` query parameter you receive on your landing page, next to the
+       order or user it belongs to. It is the click id, and without it a conversion cannot
+       be attributed to a publisher.
+    2. Send `event_id` as something you already own and never reuse — an order id works.
+       A repeated `event_id` returns `200` and changes nothing, so retrying is always safe.
+    3. Rehearse with `X-Sanbuk-Mode: test` until the action reads "verified" in the panel.
+       A test event verifies your setup but never spends your wallet.
+    4. Drop the header to go live.
+
+    All monetary values are integers in **Rial**.
+servers:
+  - url: https://t.sanbuk.com/v1
+    description: production edge
+tags:
+  - name: conversion
+    description: Conversion intake — postback and pixel
+
+paths:
+  /postback:
+    post:
+      tags: [conversion]
+      operationId: sendPostback
+      summary: Report a conversion from your server (billable)
+      description: >
+        Authenticated by your workspace API key as a Bearer token. Idempotent per
+        (action, event_id) *within a mode*: a first-time event answers 202, a repeat answers
+        200 and does nothing. A `test` rehearsal and its live twin are separate events, so
+        rehearsing with a real order id never consumes it. The event's time is our receipt
+        time — the contract carries no advertiser-supplied timestamp, so queue and retry
+        freely but do not expect a backdated event to land on an earlier day. Rate limited
+        per API key.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/SandboxMode' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PostbackBody' }
+            examples:
+              purchase:
+                summary: A purchase with a dynamic value
+                value:
+                  action: purchase
+                  event_id: ORD-10293
+                  click_id: 018f3c2e-7b1a-7c3d-9e4f-1a2b3c4d5e6f
+                  value: 25000000
+                  params: { order_id: ORD-10293 }
+              lead:
+                summary: A lead with no value
+                value:
+                  action: lead
+                  event_id: LEAD-5501
+                  click_id: 018f3c2e-7b1a-7c3d-9e4f-1a2b3c4d5e6f
+      responses:
+        '202':
+          description: Accepted — queued for attribution
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IngestAccepted' }
+        '200':
+          description: Duplicate event_id — no-op, safe to retry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IngestAccepted' }
+        '401':
+          $ref: '#/components/responses/IngestError'
+        '404':
+          $ref: '#/components/responses/IngestError'
+        '422':
+          $ref: '#/components/responses/IngestError'
+        '429':
+          description: Rate limit exceeded for this API key — retry after the window
+
+  /pixel:
+    post:
+      tags: [conversion]
+      operationId: sendPixelEvent
+      summary: Report the same conversion from the browser (verification only)
+      description: >
+        Identified by your public pixel id — no secret, so this is safe in page source. A
+        pixel event never bills on its own; it exists so Sanbuk can confirm your postbacks
+        and score fraud. Normally you do not call this directly: the `snbk` snippet does.
+        Rate limited per pixel id.
+      parameters: [{ $ref: '#/components/parameters/SandboxMode' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PixelBody' }
+            examples:
+              purchase:
+                summary: Same event_id as the postback — this is what makes them pair
+                value:
+                  pixel_id: SNBK-PX-XXXXX
+                  action: purchase
+                  event_id: ORD-10293
+                  value: 25000000
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IngestAccepted' }
+        '200':
+          description: Duplicate event_id — no-op
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IngestAccepted' }
+        '404':
+          $ref: '#/components/responses/IngestError'
+        '422':
+          $ref: '#/components/responses/IngestError'
+        '429':
+          description: Rate limit exceeded for this pixel id — retry after the window
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: The workspace API key, shown in the advertiser panel under the conversion action wizard.
+
+  parameters:
+    SandboxMode:
+      name: X-Sanbuk-Mode
+      in: header
+      required: false
+      description: >
+        `test` marks the event a rehearsal: it is stored and still verifies the action, but
+        never becomes a billable conversion. Anything else — including the header being
+        absent — is live.
+      schema: { type: string, enum: [live, test] }
+
+  schemas:
+    PostbackBody:
+      type: object
+      required: [action, event_id]
+      properties:
+        action:
+          type: string
+          maxLength: 50
+          description: The action code you defined in the panel, e.g. "purchase".
+        event_id:
+          type: string
+          maxLength: 100
+          description: >
+            Your own idempotency key — an order id is ideal. Must be identical to the
+            event_id the pixel sends for the same conversion.
+        value:
+          type: [integer, "null"]
+          minimum: 0
+          description: Rial. Required when the action's value mode is dynamic.
+        click_id:
+          type: [string, "null"]
+          format: uuid
+          description: >
+            The `snbk_cid` you received on the landing page. Without it the event is
+            recorded and verifies your setup, but nothing can be attributed or paid.
+        params:
+          type: object
+          additionalProperties: true
+          description: Extra fields validated against the action's parameter schema.
+
+    PixelBody:
+      type: object
+      required: [pixel_id, action, event_id]
+      properties:
+        pixel_id: { type: string, maxLength: 40 }
+        action: { type: string, maxLength: 50 }
+        event_id: { type: string, maxLength: 100 }
+        value: { type: [integer, "null"], minimum: 0 }
+        click_id: { type: [string, "null"], format: uuid }
+
+    IngestAccepted:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [accepted, duplicate]
+        event_id: { type: string }
+        mode:
+          type: string
+          enum: [live, test]
+          description: Which mode answered — check this to confirm your sandbox switch landed.
+
+    IngestError:
+      type: object
+      required: [message, code]
+      description: Branch on `code`; `message` is localised and may change.
+      properties:
+        message: { type: string }
+        code:
+          type: string
+          enum: [invalid_api_key, invalid_pixel_id, unknown_action, value_required, validation_failed]
+        errors:
+          type: object
+          description: Present only with `validation_failed` — field name to list of messages.
+          additionalProperties:
+            type: array
+            items: { type: string }
+
+  responses:
+    IngestError:
+      description: |
+        Intake failure. `invalid_api_key` (401) — the Bearer key is missing or wrong.
+        `invalid_pixel_id` (404) — no workspace owns that pixel id.
+        `unknown_action` (404) — the action code is not defined in your workspace.
+        `value_required` (422) — this action prices on value, so `value` is mandatory.
+        `validation_failed` (422) — the body is malformed; `errors` names the offending fields.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/IngestError' }
