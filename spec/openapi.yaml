@@ -161,7 +161,10 @@ components:
         action:
           type: string
           maxLength: 50
-          description: The action code you defined in the panel, e.g. "purchase".
+          description: >
+            The action code exactly as the panel shows it for that action — copy it, do
+            not derive it from the category: an action scoped to one brand carries a
+            brand suffix, e.g. "purchase_banbar".
         event_id:
           type: string
           maxLength: 100
@@ -188,7 +191,12 @@ components:
       required: [pixel_id, action, event_id]
       properties:
         pixel_id: { type: string, maxLength: 40 }
-        action: { type: string, maxLength: 50 }
+        action:
+          type: string
+          maxLength: 50
+          description: >
+            The same action code you send on the postback for this conversion — the two
+            are paired on (action, event_id), so a mismatch never pairs.
         event_id: { type: string, maxLength: 100 }
         value: { type: [integer, "null"], minimum: 0 }
         click_id: { type: [string, "null"], format: uuid }

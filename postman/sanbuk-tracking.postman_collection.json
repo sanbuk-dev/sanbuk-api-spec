@@ -179,7 +179,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"action\": \"lead\",\n  \"event_id\": \"{{$guid}}\",\n  \"click_id\": \"{{clickId}}\",\n  \"params\": {\n    \"phone\": \"09123334455\",\n    \"full_name\": \"سارا محمدی\"\n  }\n}",
+          "raw": "{\n  \"action\": \"{{action}}\",\n  \"event_id\": \"{{$guid}}\",\n  \"click_id\": \"{{clickId}}\",\n  \"params\": {\n    \"phone\": \"09123334455\",\n    \"full_name\": \"سارا محمدی\"\n  }\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -195,7 +195,7 @@
             "postback"
           ]
         },
-        "description": "An action whose value mode is fixed carries no `value`. Send `params` matching the campaign's lead form schema."
+        "description": "An action whose value mode is fixed carries no `value`. Send `params` matching the campaign's lead form schema. Set the `action` variable to the code the panel shows — a brand-scoped action carries a brand suffix."
       }
     },
     {
