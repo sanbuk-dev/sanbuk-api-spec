@@ -9,7 +9,7 @@
 openapi: 3.1.0
 info:
   title: Sanbuk Tracking API
-  version: 0.16.0
+  version: 0.17.0
   description: |
     Two endpoints are all an advertiser ever calls.
 
@@ -95,6 +95,7 @@ paths:
 
   /pixel:
     post:
+      security: []   # public — the pixel id is not a secret
       tags: [conversion]
       operationId: sendPixelEvent
       summary: Report the same conversion from the browser (verification only)
@@ -134,6 +135,29 @@ paths:
           $ref: '#/components/responses/IngestError'
         '429':
           description: Rate limit exceeded for this pixel id — retry after the window
+
+  /px.js:
+    # The script lives at the edge root, not under the API prefix — the snippet
+    # you paste into a page is a plain asset, not a versioned API call.
+    servers:
+      - url: https://t.sanbuk.com
+        description: production edge
+    get:
+      security: []   # a public static asset
+      tags: [conversion]
+      operationId: getPixelScript
+      summary: The tracking script the snippet loads
+      description: >
+        Served straight from the edge and cached. You normally never request it by
+        hand: paste the snippet from the panel and it loads this file, which reads
+        `snbk_cid` off the landing URL, keeps it in a first-party cookie and exposes
+        `snbk('track', …)` for the pixel call above.
+      responses:
+        '200':
+          description: The script
+          content:
+            application/javascript:
+              schema: { type: string }
 
 components:
   securitySchemes:
