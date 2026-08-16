@@ -9,7 +9,7 @@
 openapi: 3.1.0
 info:
   title: Sanbuk Tracking API
-  version: 0.17.0
+  version: 0.18.0
   description: |
     Two endpoints are all an advertiser ever calls.
 
@@ -68,11 +68,12 @@ paths:
                   value: 25000000
                   params: { order_id: ORD-10293 }
               lead:
-                summary: A lead with no value
+                summary: A lead with no value — lead_ref powers PII-free dedup
                 value:
                   action: lead
                   event_id: LEAD-5501
                   click_id: 018f3c2e-7b1a-7c3d-9e4f-1a2b3c4d5e6f
+                  params: { lead_ref: CRM-88412 }
       responses:
         '202':
           description: Accepted — queued for attribution
@@ -208,7 +209,12 @@ components:
         params:
           type: object
           additionalProperties: true
-          description: Extra fields validated against the action's parameter schema.
+          description: >
+            Extra fields validated against the action's parameter schema.
+            For lead actions, sending `lead_ref` — an opaque id from your CRM,
+            or a hash you compute from the lead's phone — is strongly
+            recommended: it powers duplicate detection without Sanbuk ever
+            storing personal data. Optional; a postback without it is accepted.
 
     PixelBody:
       type: object
