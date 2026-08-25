@@ -9,9 +9,10 @@
 openapi: 3.1.0
 info:
   title: Sanbuk Tracking API
-  version: 0.18.0
+  version: 0.19.0
   description: |
-    Two endpoints are all an advertiser ever calls.
+    Two endpoints are all an advertiser ever calls — three if the app you are advertising
+    measures installs through an MMP.
 
     **Postback (server to server)** is the financial source of truth: only a postback can
     create a payable conversion. **Pixel (browser)** is verification and anti-fraud only and
@@ -28,6 +29,13 @@ info:
     3. Rehearse with `X-Sanbuk-Mode: test` until the action reads "verified" in the panel.
        A test event verifies your setup but never spends your wallet.
     4. Drop the header to go live.
+
+    **App campaigns** attribute installs one of two ways. If your app uses a measurement
+    partner (Metrix, AdTrace, AppMetrica…), you never write code: paste the click
+    parameters and the ready postback URL Sanbuk generates into your MMP's panel, and
+    `/pb/{token}` below is what your MMP calls. If you have no MMP, Sanbuk builds the store
+    link itself with the click id inside the store's Install Referrer, and your own server
+    calls `/postback` exactly as a web campaign would.
 
     All monetary values are integers in **Rial**.
 servers:
@@ -93,6 +101,81 @@ paths:
           $ref: '#/components/responses/IngestError'
         '429':
           description: Rate limit exceeded for this API key — retry after the window
+
+  /pb/{token}:
+    get:
+      security: []   # the path token IS the credential
+      tags: [conversion]
+      operationId: sendMmpPostback
+      summary: Report a conversion from your MMP (billable)
+      description: >
+        The same intake as `/postback`, shaped for a measurement partner's panel, which can
+        be given a URL and nothing else — no header, no body. The credential therefore
+        travels in the path and opens exactly one capability: receiving a postback. Sanbuk
+        generates the whole URL for you, per action, with your MMP's own macros already in
+        place; you paste it into the postback slot for that event.
+
+
+        Idempotency, the response codes and the sandbox rule are identical to `/postback`,
+        so your MMP's automatic retries are safe. `value` is accepted as a decimal here,
+        because every MMP's revenue macro renders one; it is recorded, never billed —
+        what you pay comes from your campaign's own pricing.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          description: Your workspace's S2S token (`s2s_snbk_…`), from the panel's credentials card
+          schema: { type: string }
+        - name: action
+          in: query
+          required: true
+          description: The action code, e.g. install_activate
+          schema: { type: string, maxLength: 50 }
+        - name: event_id
+          in: query
+          required: true
+          description: >
+            Your MMP's unique id for this install or event — its install-id or device macro.
+            A repeat answers 200 and changes nothing.
+          schema: { type: string, maxLength: 100 }
+        - name: click_id
+          in: query
+          required: false
+          description: >
+            The click id Sanbuk put on the tracker link, echoed back by your MMP. Without it
+            the event is recorded but nothing is attributed and nobody is paid.
+          schema: { type: string, format: uuid }
+        - name: value
+          in: query
+          required: false
+          description: Revenue in Rial; required for actions with a dynamic value. Decimals are floored.
+          schema: { type: number, minimum: 0 }
+        - name: mode
+          in: query
+          required: false
+          description: >
+            `test` marks the call a rehearsal — it verifies your setup and never spends your
+            wallet. Stands in for the X-Sanbuk-Mode header, which an MMP panel cannot send.
+          schema: { type: string, enum: [test, live] }
+      responses:
+        '202':
+          description: Accepted — queued for attribution
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IngestAccepted' }
+        '200':
+          description: Duplicate event_id — no-op, safe to retry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IngestAccepted' }
+        '401':
+          $ref: '#/components/responses/IngestError'
+        '404':
+          $ref: '#/components/responses/IngestError'
+        '422':
+          $ref: '#/components/responses/IngestError'
+        '429':
+          description: Rate limit exceeded for this token — retry after the window
 
   /pixel:
     post:
