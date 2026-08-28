@@ -9,7 +9,7 @@
 openapi: 3.1.0
 info:
   title: Sanbuk Tracking API
-  version: 0.19.0
+  version: 0.19.1
   description: |
     Two endpoints are all an advertiser ever calls — three if the app you are advertising
     measures installs through an MMP.
@@ -293,7 +293,12 @@ components:
           type: object
           additionalProperties: true
           description: >
-            Extra fields validated against the action's parameter schema.
+            Extra fields of your own. They are COMPARED against the params the
+            action declares, never validated in the blocking sense: a declared
+            param that does not arrive is reported in the panel's request log
+            ("missing params") so you can fix the integration, and the event is
+            still accepted and still billed. No params mismatch ever produces a
+            422 or any other rejection.
             For lead actions, sending `lead_ref` — an opaque id from your CRM,
             or a hash you compute from the lead's phone — is strongly
             recommended: it powers duplicate detection without Sanbuk ever
