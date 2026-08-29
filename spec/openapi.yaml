@@ -9,8 +9,13 @@
 openapi: 3.1.0
 info:
   title: Sanbuk Tracking API
-  version: 0.19.1
+  version: 0.20.0
   description: |
+    Two halves. **Advertisers** report conversions; **publishers** ask for ads and report
+    what happened to them. Most integrators need only one half.
+
+    ## Advertisers
+
     Two endpoints are all an advertiser ever calls — three if the app you are advertising
     measures installs through an MMP.
 
@@ -38,12 +43,41 @@ info:
     calls `/postback` exactly as a web campaign would.
 
     All monetary values are integers in **Rial**.
+
+    ## Publishers
+
+    A publisher normally installs a ready-made SDK — `ad.js` for the web, the Android SDK
+    for apps, or one of the shells built on it. This section is for everyone else: a game
+    engine, a framework, or a platform we do not ship a shell for. Everything those shells
+    do is the four calls below, and they are documented here so you can do it yourself.
+
+    The serving reply **describes** an ad — headline, body, image, call-to-action wording,
+    brand colour. It is never markup. Draw it however suits your app; nothing here renders
+    anything for you.
+
+    Four obligations if you integrate directly. They are what the shipped SDKs do for you,
+    and skipping them costs somebody money:
+
+    1. **Count a view only when it was seen** — at least half the ad on screen for a
+       continuous second. Reporting on render counts ads nobody scrolled to.
+    2. **Send an `eid` with every impression** and reuse it when you retry. The counter has
+       no event identity of its own, so a retried report without one is a second view — and
+       a per-impression commission is paid on that number.
+    3. **Open the click in a real browser**, never an in-app WebView. A WebView has its own
+       cookie jar, the first-party click id does not survive it, and the conversion is never
+       attributed — the publisher does the work and earns nothing.
+    4. **Label the ad.** A reader has to be able to tell it from your own content.
+
+    Media integrated this way are marked as such and watched a little more closely, for the
+    plain reason that we cannot verify the first two from here.
 servers:
   - url: https://t.sanbuk.com/v1
     description: production edge
 tags:
   - name: conversion
     description: Conversion intake — postback and pixel
+  - name: publisher
+    description: Ad serving — asking for an ad, and reporting the view and the click
 
 paths:
   /postback:
@@ -220,6 +254,170 @@ paths:
         '429':
           description: Rate limit exceeded for this pixel id — retry after the window
 
+  /ad:
+    get:
+      tags: [publisher]
+      operationId: serveAd
+      summary: Ask what to draw in one slot
+      servers:
+        - url: https://t.sanbuk.com
+          description: production edge (these four are not under /v1)
+      description: >
+        Answers with an ad to draw, or with nothing. `{"ad": null}` is a normal answer, not
+        an error: no campaign matched, the budget is spent, the slot is capped for today.
+        Collapse the space or draw your own content — never treat it as a failure.
+      parameters:
+        - { name: placement, in: query, required: true, schema: { type: string, maxLength: 40 }, description: The slot code from the publisher panel }
+        - { name: media, in: query, required: false, schema: { type: string, maxLength: 40 }, description: 'The media code; when given, the placement must belong to it' }
+        - name: platform
+          in: query
+          required: false
+          schema: { type: string, enum: [android, ios, web] }
+          description: >
+            What you run on. Send it from a native integration: it is believed over the user
+            agent, and without it the campaigns that want app inventory are filtered out of
+            the very inventory they are for.
+        - name: package
+          in: query
+          required: false
+          schema: { type: string, maxLength: 160 }
+          description: >
+            Android package name / iOS bundle id, matched against the package the publisher
+            declared for this media.
+        - name: install_id
+          in: query
+          required: false
+          schema: { type: string, maxLength: 64 }
+          description: >
+            A random, resettable per-install id — never an advertising identifier. It is the
+            rate-limit key that still means something behind carrier NAT, where an address is
+            shared by tens of thousands of subscribers.
+        - name: sdk
+          in: query
+          required: false
+          schema: { type: string, maxLength: 40 }
+          description: >
+            Framework-tagged build, e.g. unity-1.2.0. See the kill field in the reply.
+        - { name: app_version, in: query, required: false, schema: { type: string, maxLength: 40 } }
+        - { name: os, in: query, required: false, schema: { type: string, maxLength: 40 }, description: 'The platform version a person would recognise ("13")' }
+        - { name: conn, in: query, required: false, schema: { type: string, enum: [wifi, cellular] } }
+        - name: render
+          in: query
+          required: false
+          schema: { type: string, enum: [default, custom] }
+          description: >
+            Who draws it, and therefore whose judgement decided the view was real. Send
+            `custom` when your own code draws the ad. Claiming `default` while drawing it
+            yourself misreports how the impression was measured.
+        - name: fc
+          in: query
+          required: false
+          schema: { type: string, maxLength: 2000 }
+          description: >
+            Your own "campaignId:count" view counters, for the frequency cap. Distrusted and
+            re-checked on our side; lying only ever loses the visitor some ads.
+      responses:
+        '200':
+          description: The ad to draw, or null
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServeReply' }
+
+  /i/{code}:
+    get:
+      tags: [publisher]
+      operationId: reportImpression
+      summary: Report that the ad was seen
+      servers:
+        - url: https://t.sanbuk.com
+      description: >
+        Call once the ad has really been on screen — at least half of it for a continuous
+        second. Always answers a 1×1 gif, whatever happened, so a blocked or dead call can
+        never break the page.
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string, maxLength: 40 }, description: The `code` from the serving reply }
+        - name: eid
+          in: query
+          required: false
+          schema: { type: string, maxLength: 64 }
+          description: >
+            Your own id for this view, minted when the view HAPPENS rather than when it is
+            sent. Send the same one on every retry: the count has no event identity of its
+            own, so without this a retried report is a second view — and money is paid on
+            that number. Repeats are recognised and ignored for 48 hours.
+        - { name: install_id, in: query, required: false, schema: { type: string, maxLength: 64 } }
+        - name: v
+          in: query
+          required: false
+          schema: { type: integer }
+          description: >
+            Cache buster for browsers, which otherwise reuse an identical image URL from
+            memory and never send the second request.
+      responses:
+        '200':
+          description: A 1×1 transparent gif, always
+          content:
+            image/gif: {}
+
+  /c/{code}:
+    get:
+      tags: [publisher]
+      operationId: followClick
+      summary: Send the visitor to the advertiser
+      servers:
+        - url: https://t.sanbuk.com
+      description: >
+        Open this URL in a real browser — Custom Tabs on Android, SFSafariViewController on
+        iOS, a normal navigation on the web. Do not follow the redirect in code and open the
+        destination yourself: that spends the click and lands the visitor somewhere the
+        tracker did not choose. An in-app WebView breaks attribution outright.
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string, maxLength: 40 } }
+        - { name: sub_id, in: query, required: false, schema: { type: string, maxLength: 60 }, description: 'Your own label for this placement or segment; echoed back in reports' }
+      responses:
+        '302':
+          description: Redirect to the advertiser. A dead link redirects to Sanbuk rather than to an error page — someone is mid-navigation.
+
+  /sdk/ping:
+    post:
+      tags: [publisher]
+      operationId: pingAppMedia
+      summary: Verify an app media on first launch
+      servers:
+        - url: https://api.sanbuk.com/api/v1
+          description: the app host, not the tracker edge
+      security: []
+      description: >
+        A website media proves itself because the crawler can fetch the page and find the
+        snippet. An app cannot be crawled, so first contact from inside the app is the
+        proof. Call once per launch. Always answers 200 — an integration already shipped to
+        phones must never hard-fail.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [media_code]
+              properties:
+                media_code: { type: string, maxLength: 16 }
+                package_name:
+                  type: [string, "null"]
+                  maxLength: 160
+                  description: >
+                    Your app's own identifier. Required in practice once the publisher has
+                    declared a package for the media: a code lifted from somebody's snippet
+                    must not be able to verify a media the lifter does not own.
+      responses:
+        '200':
+          description: '`ok` says whether the code matched an app media awaiting verification'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+
   /px.js:
     # The script lives at the edge root, not under the API prefix — the snippet
     # you paste into a page is a plain asset, not a versioned API call.
@@ -262,6 +460,48 @@ components:
       schema: { type: string, enum: [live, test] }
 
   schemas:
+    ServeReply:
+      type: object
+      properties:
+        ad:
+          oneOf:
+            - $ref: '#/components/schemas/ServedAd'
+            - type: "null"
+          description: Null when nothing may be served — a normal answer, not an error
+        kill:
+          type: boolean
+          description: >
+            Stop asking until this build is updated. Sent when an SDK version we no longer
+            answer identifies itself — a build below its framework's floor, one named
+            individually, or all of them switched off. It is the only way to retire code
+            that is already on people's phones, so honour it: a client that ignores this
+            keeps asking for months.
+        min_sdk:
+          type: string
+          description: The version this framework must reach, when that is why it was refused
+        reason:
+          type: string
+          description: >
+            Why the slot stayed empty. Only present while an operator has diagnostics on —
+            production sends none, so never depend on it.
+    ServedAd:
+      type: object
+      description: A description of an ad, never markup. Draw it however suits your app.
+      properties:
+        code: { type: string, description: The tracking link behind this decision; every URL below hangs off it }
+        format: { type: string, enum: [banner, native, interstitial, rewarded], description: 'As the publisher registered the slot — not something a client chooses' }
+        campaign_id: { type: string }
+        creative_id: { type: string }
+        headline: { type: [string, "null"] }
+        description: { type: [string, "null"] }
+        cta: { type: string, enum: [buy, view, learn, install, custom] }
+        cta_label: { type: string, description: 'The words for the button, already resolved — a custom call to action is the advertiser''s own wording' }
+        brand_color: { type: [string, "null"] }
+        image_url: { type: [string, "null"] }
+        logo_url: { type: [string, "null"] }
+        click_url: { type: string, description: Open this in a real browser. Never follow the redirect yourself. }
+        impression_url: { type: string }
+        fc_hours: { type: integer, description: How long your per-campaign view counters stay relevant }
     PostbackBody:
       type: object
       required: [action, event_id]
