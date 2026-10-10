@@ -9,7 +9,7 @@
 openapi: 3.1.0
 info:
   title: Sanbuk Tracking API
-  version: 0.20.0
+  version: 0.21.0
   description: |
     Two halves. **Advertisers** report conversions; **publishers** ask for ads and report
     what happened to them. Most integrators need only one half.
@@ -70,6 +70,12 @@ info:
 
     Media integrated this way are marked as such and watched a little more closely, for the
     plain reason that we cannot verify the first two from here.
+
+    **From your own server.** When your server — not your users' devices — asks for ads,
+    use `/s2s/ad` with the media's server-to-server key from the publisher panel. Send the
+    user's own address in the body: the key is what makes us believe it. A server that has no
+    "seen" signal of its own sends `auto_impression` and an `event_id`, and the view is
+    counted with the decision, once per `event_id`.
 servers:
   - url: https://t.sanbuk.com/v1
     description: production edge
@@ -323,6 +329,56 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ServeReply' }
 
+  /s2s/ad:
+    post:
+      tags: [publisher]
+      operationId: serveAdS2s
+      summary: Ask for an ad from your own server
+      description: >
+        The same decision as `/ad`, for a server asking on behalf of its users — Sanbuk RTB,
+        for one. The media is the key's. Unlike `/ad`, a refusal is an HTTP error, so a server
+        can tell a bad key from "no ad"; `{"ad": null}` is still the normal empty answer. The
+        first request with a valid key verifies the media.
+      security: [{ mediaKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [placement, ip]
+              properties:
+                placement: { type: string, maxLength: 40, description: A slot code of the key's media }
+                ip: { type: string, description: 'The user''s own IPv4 or IPv6 address — never your server''s' }
+                user_agent: { type: string, maxLength: 400 }
+                platform: { type: string, enum: [android, ios, web] }
+                package: { type: string, maxLength: 160, description: 'Android package / iOS bundle id, matched against the media''s declared package' }
+                install_id: { type: string, maxLength: 64, description: Your own hashed id of the user — never an advertising identifier }
+                app_version: { type: string, maxLength: 40 }
+                os: { type: string, maxLength: 40 }
+                auto_impression:
+                  type: boolean
+                  description: >
+                    Count the view with this decision. For a server that shows what it gets and has
+                    no "seen" signal of its own; send an `event_id` with it.
+                event_id: { type: string, maxLength: 64, pattern: '^[A-Za-z0-9._-]+$', description: 'Your id of this decision; a retried request is counted once' }
+      responses:
+        '200':
+          description: The ad, or null
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ServeReply'
+                  - type: object
+                    properties:
+                      impression_recorded: { type: boolean, description: 'With auto_impression on a served ad: the view was counted' }
+        '400': { $ref: '#/components/responses/S2sError' }
+        '401': { $ref: '#/components/responses/S2sError' }
+        '422': { $ref: '#/components/responses/S2sError' }
+        '429': { $ref: '#/components/responses/S2sError' }
+        '502': { $ref: '#/components/responses/S2sError' }
+
   /i/{code}:
     get:
       tags: [publisher]
@@ -447,6 +503,10 @@ components:
       type: http
       scheme: bearer
       description: The workspace API key, shown in the advertiser panel under the conversion action wizard.
+    mediaKey:
+      type: http
+      scheme: bearer
+      description: The media's server-to-server key (sk_media_snbk_ and 32 characters), made in the publisher panel and shown once.
 
   parameters:
     SandboxMode:
@@ -588,6 +648,18 @@ components:
             items: { type: string }
 
   responses:
+    S2sError:
+      description: >
+        A refusal of /s2s/ad, with a stable code: invalid_s2s_key (401), invalid_json (400),
+        invalid_placement / invalid_ip (422), rate_limited (429, with Retry-After),
+        upstream_unavailable (502). Branch on `code`; `message` is for people.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string }
+              code: { type: string }
     IngestError:
       description: |
         Intake failure. `invalid_api_key` (401) — the Bearer key is missing or wrong.
