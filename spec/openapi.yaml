@@ -9,7 +9,7 @@
 openapi: 3.1.0
 info:
   title: Sanbuk Tracking API
-  version: 0.21.0
+  version: 0.22.0
   description: |
     Two halves. **Advertisers** report conversions; **publishers** ask for ads and report
     what happened to them. Most integrators need only one half.
@@ -552,6 +552,7 @@ components:
         format: { type: string, enum: [banner, native, interstitial, rewarded], description: 'As the publisher registered the slot — not something a client chooses' }
         campaign_id: { type: string }
         creative_id: { type: string }
+        advertiser: { type: [string, "null"], maxLength: 120, description: 'The brand behind the ad, as the advertiser named it in the panel. Show it as the sponsor if your layout has room' }
         headline: { type: [string, "null"] }
         description: { type: [string, "null"] }
         cta: { type: string, enum: [buy, view, learn, install, custom] }
