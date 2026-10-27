@@ -9,7 +9,7 @@
 openapi: 3.1.0
 info:
   title: Sanbuk Tracking API
-  version: 0.22.0
+  version: 0.23.0
   description: |
     Two halves. **Advertisers** report conversions; **publishers** ask for ads and report
     what happened to them. Most integrators need only one half.
@@ -379,6 +379,60 @@ paths:
         '429': { $ref: '#/components/responses/S2sError' }
         '502': { $ref: '#/components/responses/S2sError' }
 
+  /s2s/check:
+    post:
+      tags: [publisher]
+      operationId: checkS2s
+      summary: Check your key and a slot code without serving
+      description: >
+        Whether `/s2s/ad` with this key and slot code would be served, and if not, the one thing
+        to fix. Nothing is served, counted or recorded: the media is not verified and the key's
+        last use does not change. For a setup test — Sanbuk RTB's connection test asks it — not
+        for traffic; at most 60 checks per key a minute.
+      security: [{ mediaKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [placement]
+              properties:
+                placement: { type: string, maxLength: 40, description: A slot code of the key's media }
+      responses:
+        '200':
+          description: The verdict, whatever it says
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [verdict, media, placement, format, verified, package, campaigns_available]
+                properties:
+                  verdict:
+                    type: string
+                    enum: [ok, placement_not_found, placement_inactive, media_not_approved, workspace_suspended, probation_blocked]
+                    description: >
+                      ok — the slot would be served. placement_not_found — no slot with this code in
+                      the key's media (another media's slot reads the same). placement_inactive — the
+                      slot is paused. media_not_approved — no expert's approval. workspace_suspended —
+                      the publisher is suspended. probation_blocked — the trial's daily allowance is
+                      spent, or the trial failed.
+                  media: { type: string, description: The key's media code }
+                  placement: { type: string, description: The slot code as asked }
+                  format: { type: [string, 'null'], description: 'The slot''s format (native, banner…), once found' }
+                  verified:
+                    type: boolean
+                    description: Whether the media is verified; if not, the first /s2s/ad request verifies it, so false is not a refusal
+                  package: { type: [string, 'null'], description: 'The only app the media serves, when it declared one — requests must carry this package' }
+                  campaigns_available:
+                    type: boolean
+                    description: With ok, whether a campaign could fill the slot right now for the widest audience (any province, an Android user). Never a count.
+        '400': { $ref: '#/components/responses/S2sError' }
+        '401': { $ref: '#/components/responses/S2sError' }
+        '422': { $ref: '#/components/responses/S2sError' }
+        '429': { $ref: '#/components/responses/S2sError' }
+        '502': { $ref: '#/components/responses/S2sError' }
+
   /i/{code}:
     get:
       tags: [publisher]
@@ -651,7 +705,7 @@ components:
   responses:
     S2sError:
       description: >
-        A refusal of /s2s/ad, with a stable code: invalid_s2s_key (401), invalid_json (400),
+        A refusal of /s2s/ad or /s2s/check, with a stable code: invalid_s2s_key (401), invalid_json (400),
         invalid_placement / invalid_ip (422), rate_limited (429, with Retry-After),
         upstream_unavailable (502). Branch on `code`; `message` is for people.
       content:
